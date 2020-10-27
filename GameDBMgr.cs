@@ -17,6 +17,8 @@ namespace GameDbManager
 {
 	public partial class GameDBMgr : Form
 	{
+        public string ActiveXMLFileName;
+
 		public class GenreTable
 		{
 			public int ID;
@@ -36,10 +38,14 @@ namespace GameDbManager
 		{
 			InitializeComponent();
 
-			if (File.Exists("db.xml"))
-				gameDB.ReadXml("db.xml");
+            Text = "Game DB Manager - " + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
 
-			Crc32.gen_crc_table();
+            ActiveXMLFileName = "db.xml";
+
+            if (File.Exists(ActiveXMLFileName))
+				gameDB.ReadXml(ActiveXMLFileName);
+
+            Crc32.gen_crc_table();
 
 			//Don't change the ID or order of this table, as it must match the one in the firmware!!
 			if (gameDB.Genre.Count == 0)
@@ -77,7 +83,7 @@ namespace GameDbManager
 
 		private void Form1_FormClosed(object sender, FormClosedEventArgs e)
 		{
-			gameDB.WriteXml("db.xml");
+			gameDB.WriteXml(ActiveXMLFileName);
 		}
 
 		private void dataGridView1_CellContentClick(object sender, DataGridViewCellEventArgs e)
@@ -148,7 +154,9 @@ namespace GameDbManager
 			public uint checksum;
 			public ushort remap;
 			public int GameID;
-		};
+            public string TextName;
+            public string ScreenName;
+        };
 
 		static byte ProcessChar(byte b)
 		{
@@ -164,10 +172,12 @@ namespace GameDbManager
 			byte[] scshots;
 			ushort sccnt;
 			ushort gamecnt;
-
-			gamecnt = 0;
+            int crptBlock;
+            
+            gamecnt = 0;
 			sccnt = 0;
-			games = new Game[1024];
+            crptBlock = 0;
+            games = new Game[1024];
 			scshots = new Byte[1024 * 3072];
 
 			if (form != null)
@@ -235,8 +245,10 @@ namespace GameDbManager
 						g.checksum = namecrc;
 						g.remap = existing.remap;
 						g.GameID = existing.GameID;
+                        g.TextName = existing.TextName;
+                        g.ScreenName = existing.ScreenName;
 
-						games[gamecnt] = g;
+                        games[gamecnt] = g;
 						++gamecnt;
 					}
 					else
@@ -256,8 +268,10 @@ namespace GameDbManager
 								g.checksum = namecrc;
 								g.remap = sccnt;
 								g.GameID = ck.GameID;
+                                g.TextName = gg.Name;
+                                g.ScreenName = gg.Screenshot;
 
-								games[gamecnt] = g;
+                                games[gamecnt] = g;
 								++gamecnt;
 
 								//copy screenshot to the scshot block
@@ -280,7 +294,39 @@ namespace GameDbManager
 								Debug.Assert(scshot2.Length == 3072);
 								Array.Copy(scshot2, 0, scshots, 3072 * sccnt, scshot2.Length);
 
-								sccnt++;
+                                // The issue is there is a sequence of screenshot indexes that the lookup fails to 
+                                // resolve to the right location displaying junk data as the screenshot
+                                // This is the sequence
+                                // Index:  0  21  42  64  85  106  128  149  170  192
+                                // Spacing: 21  21  22  21  21   22   21   21   22   ...
+                                // 
+                                // A repeating pattern of 21, 21, 22...
+                                if (((sccnt - crptBlock) % 21 == 0) && ((sccnt + 1) % 64 != 0))
+                                {
+                                    // true
+                                    Console.WriteLine("Corrupted Index Skipped: {0}", sccnt);
+
+                                    sccnt++;
+                                    games[gamecnt - 1].remap = sccnt;
+                                    Array.Copy(scshot2, 0, scshots, 3072 * sccnt, scshot2.Length);
+                                }
+                                else if (sccnt % 64 == 0)
+                                {
+                                    // true
+                                    Console.WriteLine("Corrupted Index Skipped: {0}", sccnt);
+
+                                    sccnt++;
+                                    games[gamecnt - 1].remap = sccnt;
+                                    Array.Copy(scshot2, 0, scshots, 3072 * sccnt, scshot2.Length);
+
+                                    crptBlock++;
+                                }
+                                else
+                                {
+                                    // false. do nothing
+                                }
+
+                                sccnt++;
 							}
 						}
 					}
@@ -333,8 +379,10 @@ namespace GameDbManager
 								g.checksum = namecrc;
 								g.remap = existing.remap;
 								g.GameID = existing.GameID;
+                                g.TextName = existing.TextName;
+                                g.ScreenName = existing.ScreenName;
 
-								games[gamecnt] = g;
+                                games[gamecnt] = g;
 								++gamecnt;
 							}
 							else
@@ -354,8 +402,10 @@ namespace GameDbManager
 										g.checksum = namecrc;
 										g.remap = sccnt;
 										g.GameID = ck.GameID;
+                                        g.TextName = gg.Name;
+                                        g.ScreenName = gg.Screenshot;
 
-										games[gamecnt] = g;
+                                        games[gamecnt] = g;
 										++gamecnt;
 
 										//copy screenshot to the scshot block
@@ -378,7 +428,33 @@ namespace GameDbManager
 										Debug.Assert(scshot2.Length == 3072);
 										Array.Copy(scshot2, 0, scshots, 3072 * sccnt, scshot2.Length);
 
-										sccnt++;
+                                        // Bad index patch
+                                        if (((sccnt - crptBlock) % 21 == 0) && ((sccnt + 1) % 64 != 0))
+                                        {
+                                            // true
+                                            Console.WriteLine("Corrupted Index Skipped: {0}", sccnt);
+
+                                            sccnt++;
+                                            games[gamecnt - 1].remap = sccnt;
+                                            Array.Copy(scshot2, 0, scshots, 3072 * sccnt, scshot2.Length);
+                                        }
+                                        else if (sccnt % 64 == 0)
+                                        {
+                                            // true
+                                            Console.WriteLine("Corrupted Index Skipped: {0}", sccnt);
+
+                                            sccnt++;
+                                            games[gamecnt - 1].remap = sccnt;
+                                            Array.Copy(scshot2, 0, scshots, 3072 * sccnt, scshot2.Length);
+
+                                            crptBlock++;
+                                        }
+                                        else
+                                        {
+                                            // false. do nothing
+                                        }
+
+                                        sccnt++;
 									}
 								}
 							}
@@ -401,17 +477,37 @@ namespace GameDbManager
 			{
 				games = games.Take(gamecnt).OrderBy(x => x.checksum).ToArray();
 
-				//Console.WriteLine("Writting game.db");
+                //Console.WriteLine("Writting game.db");
+                List<string> debugOutput = new List<string>();
 
-				FileStream fs = new FileStream(dir + "/games.db", FileMode.Create, FileAccess.Write);
+                //Console.WriteLine("{0,8} {1,8} {2,10} {3,4} {4,-32} {5,-32}", "Little", "Big", "Int", "Indx", "DB Text Name", "Screenshot");
+                debugOutput.Add(String.Format("{0,8},{1,8},{2,10},{3,4},{4,-32},{5,-32}", "Little", "Big", "Int", "Indx", "DB Text Name", "Screenshot"));
+
+                FileStream fs = new FileStream(dir + "/games.db", FileMode.Create, FileAccess.Write);
 				BinaryWriter bw = new BinaryWriter(fs);
 
 				foreach (var g in games)
 				{
 					bw.Write(g.checksum);
-				}
 
-				for (int i = 0; i < 1024 - games.Length; ++i)
+                    // TODO: Add Debug Check
+                    string shortName = g.TextName.Length > 31 ? g.TextName.Substring(0, 31) : g.TextName;
+                    //Console.WriteLine("{0,8} {1,8} {2,10} {3,4} {4,-32} {5,-32}", LittleEndian(g.checksum.ToString("X8")), g.checksum.ToString("X8"), g.checksum, g.remap, shortName, g.ScreenName);
+                    debugOutput.Add(String.Format("{0,8},{1,8},{2,10},{3,4},{4,-32},{5,-32}", LittleEndian(g.checksum.ToString("X8")), g.checksum.ToString("X8"), g.checksum, g.remap, shortName, g.ScreenName));
+                }
+
+                if(form.debugToolStripMenuItem.Checked)
+                {
+                    foreach (string d in debugOutput)
+                    {
+                        Console.WriteLine(d.Replace(',', ' '));
+                    }
+
+                    System.IO.File.WriteAllLines(dir + "/debug.csv", debugOutput.ToArray());
+                }
+                
+
+                for (int i = 0; i < 1024 - games.Length; ++i)
 					bw.Write(0xFFFFFFFF);
 
 				foreach (var g in games)
@@ -432,8 +528,18 @@ namespace GameDbManager
 				ScanDir(d, db, form);
 		}
 
+        static string LittleEndian(string num)
+        {
+            int number = Convert.ToInt32(num, 16);
+            byte[] bytes = BitConverter.GetBytes(number);
+            string retval = "";
+            foreach (byte b in bytes)
+                retval += b.ToString("X2");
+            return retval;
+        }
 
-		Thread thProcessing = null;
+
+        Thread thProcessing = null;
 		private void button2_Click(object sender, EventArgs e)
 		{
 			progressBar1.Value = 0;
@@ -587,9 +693,35 @@ namespace GameDbManager
 		{
 
 		}
-	}
 
-	public sealed class Crc32 : HashAlgorithm
+        private void debugToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            debugToolStripMenuItem.Checked = !debugToolStripMenuItem.Checked;
+        }
+
+        private void openDBToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            OpenFileDialog ofn = new OpenFileDialog();
+            ofn.CheckPathExists = true;
+            ofn.Multiselect = false;
+            ofn.Filter = "Database XML (*.xml)|*.xml";
+
+            if (ofn.ShowDialog() == DialogResult.OK)
+            {
+                ActiveXMLFileName = ofn.SafeFileName;
+
+                gameDB.Clear();
+
+                if (File.Exists(ActiveXMLFileName))
+                    gameDB.ReadXml(ActiveXMLFileName);
+
+                Console.WriteLine("{0} DB file loaded.", ActiveXMLFileName);
+
+            }
+        }
+    }
+
+    public sealed class Crc32 : HashAlgorithm
 	{
 		public const UInt32 DefaultPolynomial = 0xedb88320u;
 		public const UInt32 DefaultSeed = 0xffffffffu;
